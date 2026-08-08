@@ -1,0 +1,34 @@
+# Configuration for plsk2sa — copy to plsk2sa.yaml and adjust.
+
+# Old Plesk server, as SSH target (root access required)
+old_server: root@203.0.113.10
+
+# New Ubuntu server. "local" = the framework runs directly on the new
+# server (recommended; it can then pull the rsyncs from the old server
+# itself). Alternatively an SSH target like root@203.0.113.20 — the new
+# server then needs SSH access to the old one in turn (agent
+# forwarding: ssh -A).
+new_server: local
+
+# FQDN of the mail server (must match the PTR record of the new IP!)
+mail_hostname: mail.example.com
+
+# Working directory: manifest, DB dumps, secrets, logs.
+# Careful: contains plaintext mail passwords — no cloud-synced folder!
+workdir: ~/plsk2sa-work
+
+# Target PHP version on Ubuntu 24.04
+php_version: "8.3"
+
+# Empty = migrate all domains that have hosting; otherwise explicit list.
+domains: []
+#  - example.com
+#  - example.org
+
+# Where Plesk keeps the maildirs (default for Plesk on Linux)
+plesk_maildir_root: /var/qmail/mailnames
+
+# Extra SSH options for all connections
+ssh_options:
+  - "-o"
+  - "BatchMode=yes"

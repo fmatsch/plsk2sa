@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plsk2sa"
+version = "0.1.0"
+description = "Migriert Domains (Web + Mail + DB) von Plesk auf einen Standalone-Ubuntu-Stack"
+requires-python = ">=3.9"
+dependencies = ["PyYAML>=6"]
+
+[project.scripts]
+plsk2sa = "plsk2sa.cli:main"
+
+[tool.setuptools]
+packages = ["plsk2sa", "plsk2sa.modules"]
+
+[tool.setuptools.package-data]
+plsk2sa = ["templates/*"]

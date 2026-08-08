@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+plsk2sa.yaml
+workdir/
+*.egg-info/
