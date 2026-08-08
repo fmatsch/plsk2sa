@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "plsk2sa"
 version = "0.1.0"
 description = "Migriert Domains (Web + Mail + DB) von Plesk auf einen Standalone-Ubuntu-Stack"
+license = {file = "LICENSE"}
 requires-python = ">=3.9"
 dependencies = ["PyYAML>=6"]
 
