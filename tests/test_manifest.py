@@ -34,8 +34,8 @@ class TestDomain(unittest.TestCase):
                         databases=["böse;drop"],
                         aliases=[["nur-ein-feld"]])
         problems = "\n".join(d.validate())
-        for fragment in ("Domainname", "PHP-Version", "absoluter Pfad",
-                         "DB-Name", "Alias"):
+        for fragment in ("domain name", "PHP version", "absolute path",
+                         "database name", "alias"):
             self.assertIn(fragment, problems)
 
 
@@ -62,7 +62,7 @@ class TestManifest(unittest.TestCase):
 
     def test_duplicate_domains_detected(self):
         m = Manifest(source="x", domains=[make_domain(), make_domain()])
-        self.assertTrue(any("doppelt" in p for p in m.validate()))
+        self.assertTrue(any("twice" in p for p in m.validate()))
 
 
 if __name__ == "__main__":

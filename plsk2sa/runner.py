@@ -1,17 +1,21 @@
-"""Befehlsausführung — lokal oder per SSH, mit Dry-Run und Logging.
+"""Command execution on the old/new server, with dry-run and logging.
 
-host == "local"  -> Befehl läuft direkt auf dieser Maschine.
-host == SSH-Ziel -> Befehl läuft remote; Argumente werden shell-sicher
-                    gequotet, Skripte gehen über stdin (kein Quoting-Risiko).
+A host is an opaque string. "local" runs on this machine; any other
+string is looked up in the registered transports (the GUI registers
+Paramiko connections under "user@host") and otherwise falls back to the
+system `ssh` binary.
 
-Dry-Run überspringt nur *mutierende* Befehle; Lesezugriffe (Export,
-Statusabfragen) laufen auch im Dry-Run, damit der Plan realistisch ist.
+Dry-run skips only *mutating* commands; read-only calls (export, status
+queries) still run so the previewed plan is realistic.
 """
 
 import logging
+import posixpath
 import shlex
 import subprocess
 from pathlib import Path
+
+from .transport import LocalTransport, OpenSSHTransport, Transport
 
 log = logging.getLogger("plsk2sa")
 
@@ -24,71 +28,91 @@ class Runner:
     def __init__(self, dry_run: bool = False, ssh_options=None):
         self.dry_run = dry_run
         self.ssh_options = list(ssh_options or [])
+        self._transports = {}
+        self._protected = {}  # host -> label; mutating commands there are always announced
 
-    def _argv(self, host: str, argv):
-        if host == "local":
-            return list(argv)
-        remote = " ".join(shlex.quote(a) for a in argv)
-        return ["ssh", *self.ssh_options, host, remote]
+    def protect(self, host: str, label: str = "Plesk server"):
+        """Mark a host as one that must stay untouched unless announced: every mutating
+        command sent to it is logged (and flagged for the GUI) before it runs."""
+        self._protected[host] = label
+
+    def _announce(self, host: str, argv, purpose, revert: bool):
+        label = self._protected[host]
+        what = purpose or ("Run a command that may change data: " + " ".join(argv)[:120])
+        if self.dry_run:
+            log.warning("WOULD CHANGE the %s: %s", label, what,
+                        extra={"source_change": True, "revert": revert, "dry_run": True})
+        else:
+            log.warning("CHANGING the %s: %s", label, what,
+                        extra={"source_change": True, "revert": revert, "dry_run": False})
+
+    def register(self, host: str, transport: Transport):
+        self._transports[host] = transport
+
+    def unregister(self, host: str):
+        self._protected.pop(host, None)
+        t = self._transports.pop(host, None)
+        if t is not None:
+            t.close()
+
+    def transport(self, host: str) -> Transport:
+        t = self._transports.get(host)
+        if t is None:
+            t = LocalTransport() if host == "local" else OpenSSHTransport(host, self.ssh_options)
+            self._transports[host] = t
+        return t
 
     def run(self, host, argv, *, input_text=None, input_path=None,
-            mutating=True, check=True) -> subprocess.CompletedProcess:
+            mutating=True, check=True, purpose=None, revert=False) -> subprocess.CompletedProcess:
         desc = f"[{host}] {' '.join(argv)}"
+        if mutating and host in self._protected:
+            self._announce(host, argv, purpose, revert)
         if self.dry_run and mutating:
             log.info("dry-run: %s", desc)
             return subprocess.CompletedProcess(argv, 0, "", "")
         log.debug("run: %s", desc)
 
-        stdin = open(input_path, "rb") if input_path else None
-        try:
-            cp = subprocess.run(
-                self._argv(host, argv),
-                input=input_text if stdin is None else None,
-                stdin=stdin,
-                text=True,
-                capture_output=True,
-            )
-        finally:
-            if stdin:
-                stdin.close()
-
+        cp = self.transport(host).exec(argv, stdin_text=input_text, stdin_path=input_path)
         if check and cp.returncode != 0:
             stderr = (cp.stderr or "").strip()
-            raise CommandError(f"Befehl fehlgeschlagen (exit {cp.returncode}): {desc}\n{stderr}")
+            raise CommandError(f"Command failed (exit {cp.returncode}): {desc}\n{stderr}")
         return cp
 
-    def script(self, host, script_text, *, mutating=True, check=True):
-        """Bash-Skript über stdin ausführen (umgeht SSH-Quoting komplett)."""
+    def script(self, host, script_text, *, mutating=True, check=True, purpose=None, revert=False):
+        """Run a bash script via stdin (avoids all quoting problems)."""
         return self.run(host, ["bash", "-s"], input_text=script_text,
-                        mutating=mutating, check=check)
+                        mutating=mutating, check=check, purpose=purpose, revert=revert)
 
-    def put(self, host, path, content, mode="0644"):
-        """Dateiinhalt auf dem Zielhost ablegen (Heredoc, atomar genug)."""
+    def put(self, host, path, content, mode="0644", purpose=None):
+        """Write file content on the target host (heredoc)."""
         token = "PLSK2SA_EOF"
         if token in content:
-            raise ValueError(f"Dateiinhalt enthält das Heredoc-Token {token}")
+            raise ValueError(f"File content contains the heredoc token {token}")
         if not content.endswith("\n"):
             content += "\n"
         qpath = shlex.quote(str(path))
-        qparent = shlex.quote(str(Path(path).parent))
+        qparent = shlex.quote(posixpath.dirname(str(path)) or "/")
         script = (
             f"set -e\nmkdir -p {qparent}\n"
             f"cat > {qpath} <<'{token}'\n{content}{token}\n"
             f"chmod {mode} {qpath}\n"
         )
         log.debug("put: [%s] %s (%s)", host, path, mode)
-        return self.script(host, script)
+        return self.script(host, script, purpose=purpose or f"Write the file {path}")
 
     def download(self, host, argv, dest, *, check=True):
-        """Befehl ausführen und stdout binär in eine lokale Datei streamen."""
+        """Run a command and stream its stdout (binary) into a local file."""
         desc = f"[{host}] {' '.join(argv)} > {dest}"
         log.debug("download: %s", desc)
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with open(dest, "wb") as f:
-            cp = subprocess.run(self._argv(host, argv), stdout=f,
-                                stderr=subprocess.PIPE)
+        cp = self.transport(host).exec(argv, stdout_path=dest)
         if check and cp.returncode != 0:
-            stderr = cp.stderr.decode(errors="replace").strip()
-            raise CommandError(f"Download fehlgeschlagen (exit {cp.returncode}): {desc}\n{stderr}")
+            raise CommandError(
+                f"Download failed (exit {cp.returncode}): {desc}\n{(cp.stderr or '').strip()}")
         return cp
+
+    def close(self):
+        for t in self._transports.values():
+            t.close()
+        self._transports.clear()

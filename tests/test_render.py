@@ -21,7 +21,7 @@ class TestRender(unittest.TestCase):
                    "SITEUSER": "w_example_de", "PHP": "8.3"}
         for name in ("nginx-vhost.conf", "php-fpm-pool.conf"):
             out = render_template(name, mapping)
-            self.assertNotIn("{{", out, f"{name}: unaufgelöste Platzhalter")
+            self.assertNotIn("{{", out, f"{name}: unresolved placeholders")
             self.assertIn("example.de", out)
         out = render_template("postfix-setup.sh", {"MAIL_HOSTNAME": "mail.example.de"})
         self.assertIn("myhostname = mail.example.de", out)

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>plsk2sa - Plesk to Standalone</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">p2s</span>
+      <div class="brand-text">
+        <strong>plsk2sa</strong>
+        <span>Plesk &rarr; standalone Ubuntu</span>
+      </div>
+    </div>
+    <span id="demo-badge" class="badge demo" hidden>Demo mode &middot; simulated servers</span>
+    <button id="quit" class="btn ghost small" type="button">Quit</button>
+  </header>
+
+  <div class="layout">
+    <nav id="stepper" class="stepper" aria-label="Progress"></nav>
+    <main id="main" tabindex="-1"></main>
+  </div>
+
+  <noscript>This page needs JavaScript.</noscript>
+  <script src="/app.js"></script>
+</body>
+</html>

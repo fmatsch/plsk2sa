@@ -1,4 +1,4 @@
-"""Web pro Domain: Site-Nutzer, Docroot-Sync, PHP-FPM-Pool, nginx-vHost."""
+"""Web per domain: site user, docroot sync, PHP-FPM pool, nginx vhost."""
 
 import logging
 import shlex
@@ -19,7 +19,7 @@ class WebModule(Module):
         docroot = domain.docroot
         php = domain.php
 
-        log.info("[web] %s: Nutzer %s, Docroot %s", domain.name, user, docroot)
+        log.info("[web] %s: user %s, docroot %s", domain.name, user, docroot)
         self.runner.script(new, f"""set -euo pipefail
 id {shlex.quote(user)} &>/dev/null || \\
     useradd -d {shlex.quote(docroot)} -s /usr/sbin/nologin {shlex.quote(user)}
@@ -47,11 +47,8 @@ systemctl reload php{php}-fpm nginx
 """)
 
     def sync_domain(self, domain: Domain):
-        log.info("[web] %s: rsync Webdateien", domain.name)
-        src = f"{self.ctx.old}:{domain.docroot_src}/"
-        self.runner.run(self.ctx.new, [
-            "rsync", "-a", "--delete", src, f"{domain.docroot}/",
-        ])
+        log.info("[web] %s: rsync web files", domain.name)
+        self.ctx.rsync_pull(f"{domain.docroot_src}/", f"{domain.docroot}/", delete=True)
         self.runner.run(self.ctx.new, [
             "chown", "-R", f"{domain.site_user}:{domain.site_user}", domain.docroot,
         ])
@@ -60,7 +57,7 @@ systemctl reload php{php}-fpm nginx
         results = []
         cp = self.runner.run(self.ctx.new, ["nginx", "-t"],
                              mutating=False, check=False)
-        results.append((cp.returncode == 0, "nginx-Konfiguration gültig"))
+        results.append((cp.returncode == 0, "nginx configuration is valid"))
 
         for domain in self.ctx.domains():
             cp = self.runner.run(self.ctx.new, [
@@ -69,5 +66,5 @@ systemctl reload php{php}-fpm nginx
             ], mutating=False, check=False)
             code = cp.stdout.strip()
             ok = code.startswith(("2", "3"))
-            results.append((ok, f"HTTP {domain.name}: Status {code or 'keine Antwort'}"))
+            results.append((ok, f"HTTP {domain.name}: status {code or 'no response'}"))
         return results

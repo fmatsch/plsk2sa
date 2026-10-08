@@ -4,3 +4,6 @@ __pycache__/
 plsk2sa.yaml
 workdir/
 *.egg-info/
+build/
+dist/
+.claude/

@@ -1,0 +1,85 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.9" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.12" }
+          - { os: macos-latest, python: "3.12" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e .
+      - run: python -m unittest discover -s tests -v
+
+  package:
+    name: package (${{ matrix.name }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-22.04 keeps the glibc requirement of the Linux binary low
+          - { os: ubuntu-22.04, name: linux, exe: plsk2sa }
+          - { os: windows-latest, name: windows, exe: plsk2sa.exe }
+          - { os: macos-latest, name: macos, exe: plsk2sa }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install . pyinstaller
+      - run: pyinstaller --noconfirm --clean packaging/plsk2sa.spec
+      - name: Smoke test the built program
+        run: python packaging/smoke_test.py dist/${{ matrix.exe }}
+      - name: Collect release file
+        shell: bash
+        run: |
+          mkdir release
+          case "${{ matrix.name }}" in
+            windows) cp dist/plsk2sa.exe release/plsk2sa-windows-x64.exe ;;
+            linux)   tar -czf release/plsk2sa-linux-x64.tar.gz -C dist plsk2sa ;;
+            macos)   tar -czf release/plsk2sa-macos-arm64.tar.gz -C dist plsk2sa ;;
+          esac
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plsk2sa-${{ matrix.name }}
+          path: release/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: release
+          pattern: plsk2sa-*
+          merge-multiple: true
+      - name: Checksums
+        run: cd release && sha256sum * > SHA256SUMS
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: release/*
+          generate_release_notes: true

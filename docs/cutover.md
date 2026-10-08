@@ -5,7 +5,8 @@
 - [ ] Lower the TTL of all relevant DNS records (A, AAAA, MX) to **300 s**.
 - [ ] At the new server's hosting provider: get **outbound port 25**
       unblocked and set the **PTR/reverse DNS** of the IP to `mail_hostname`.
-- [ ] `plsk2sa migrate` and `plsk2sa verify` are green.
+- [ ] The full migration finished and its verification passed (wizard: *Migrate*, or
+      `plsk2sa migrate` and `plsk2sa verify`).
 - [ ] Test the websites locally:
       `curl -H 'Host: example.com' http://NEW_IP/`
 - [ ] App configs (wp-config.php etc.) updated with the new database
@@ -20,7 +21,9 @@
 1. [ ] Stop mail acceptance on the **old** server so nothing new
        arrives: `systemctl stop postfix`
        (sending servers retry automatically — nothing is lost).
-2. [ ] **Final data sync** on the controller:
+2. [ ] **Final data sync**. In the wizard, run through the steps again and choose
+       *Final sync only* in the last step (untick *Preview only* first). On the
+       command line:
        ```bash
        plsk2sa export && plsk2sa sync
        ```

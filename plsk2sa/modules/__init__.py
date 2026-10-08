@@ -1,11 +1,11 @@
-"""Modul-Registry. Jedes Modul kapselt einen Dienst-Bereich und ist
-idempotent — mehrfaches Ausführen ist sicher und dient dem Nachsync.
+"""Module registry. Each module encapsulates one service area and is
+idempotent - running it repeatedly is safe and serves as re-sync.
 
-Lebenszyklus:
-  provision()            einmalig: Basis-Stack auf dem neuen Server
-  migrate_domain(domain) pro Domain: Konfiguration + Daten
-  sync_domain(domain)    pro Domain: nur Daten nachziehen (Cutover)
-  verify()               Checks; Liste von (ok: bool, meldung: str)
+Lifecycle:
+  provision()            once: base stack on the new server
+  migrate_domain(domain) per domain: configuration + data
+  sync_domain(domain)    per domain: only pull data again (cutover)
+  verify()               checks; list of (ok: bool, message: str)
 """
 
 from typing import List, Tuple

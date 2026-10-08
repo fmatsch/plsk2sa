@@ -1,8 +1,10 @@
-"""Konfiguration (plsk2sa.yaml) laden und validieren."""
+"""Load and validate the configuration (plsk2sa.yaml)."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
+
+from .fsutil import read_text
 
 
 class ConfigError(RuntimeError):
@@ -19,10 +21,17 @@ class Config:
     domains: List[str] = field(default_factory=list)
     plesk_maildir_root: str = "/var/qmail/mailnames"
     ssh_options: List[str] = field(default_factory=lambda: ["-o", "BatchMode=yes"])
+    # SSH port of the old server as seen from the new server (for rsync)
+    old_ssh_port: int = 22
+    # Optional: key and known_hosts file ON THE NEW SERVER used to pull from
+    # the old one. The GUI sets these for its temporary server-to-server key.
+    transfer_key: str = ""
+    transfer_known_hosts: str = ""
 
     KNOWN_KEYS = {
         "old_server", "new_server", "mail_hostname", "workdir",
         "php_version", "domains", "plesk_maildir_root", "ssh_options",
+        "old_ssh_port", "transfer_key", "transfer_known_hosts",
     }
 
     @classmethod
@@ -30,26 +39,26 @@ class Config:
         p = Path(path)
         if not p.is_file():
             raise ConfigError(
-                f"Konfigurationsdatei fehlt: {p} "
-                f"(Vorlage: plsk2sa.example.yaml)"
+                f"Configuration file missing: {p} "
+                f"(template: plsk2sa.example.yaml)"
             )
         try:
-            import yaml  # bewusst hier: Tests ohne PyYAML bleiben lauffähig
+            import yaml  # deliberately here: the GUI does not need PyYAML
         except ImportError:
             raise ConfigError(
-                "PyYAML fehlt — installieren mit: pip install -e . "
-                "(oder pip install pyyaml)"
+                "PyYAML is missing - install it with: pip install -e . "
+                "(or pip install pyyaml)"
             ) from None
-        data = yaml.safe_load(p.read_text()) or {}
+        data = yaml.safe_load(read_text(p)) or {}
         if not isinstance(data, dict):
-            raise ConfigError(f"{p}: erwartet ein YAML-Mapping")
+            raise ConfigError(f"{p}: expected a YAML mapping")
 
         unknown = set(data) - cls.KNOWN_KEYS
         if unknown:
-            raise ConfigError(f"{p}: unbekannte Schlüssel: {', '.join(sorted(unknown))}")
+            raise ConfigError(f"{p}: unknown keys: {', '.join(sorted(unknown))}")
         for key in ("old_server", "mail_hostname"):
             if not data.get(key):
-                raise ConfigError(f"{p}: Pflichtfeld fehlt: {key}")
+                raise ConfigError(f"{p}: required field missing: {key}")
 
         cfg = cls(**data)
         cfg.workdir = str(Path(cfg.workdir).expanduser())
