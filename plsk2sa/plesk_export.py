@@ -287,8 +287,13 @@ class PleskExporter:
         return []
 
     # ------------------------------------------------------------------
-    def export(self, only: Optional[Iterable[str]] = None) -> Manifest:
+    def export(self, only: Optional[Iterable[str]] = None,
+               php_by_domain: Optional[Dict[str, str]] = None) -> Manifest:
+        """php_by_domain: PHP version each domain's pool should use (default: config.php_version)."""
         ctx = self.ctx
+        if php_by_domain is None:  # written by `plsk2sa prepare` (CLI); the GUI passes it directly
+            saved = ctx.workdir / "php_by_domain.json"
+            php_by_domain = json.loads(saved.read_text(encoding="utf-8")) if saved.is_file() else {}
         ctx.ensure_workdir()
 
         wanted = set(only) if only else set(ctx.config.domains)
@@ -301,7 +306,8 @@ class PleskExporter:
             raise ExportError("No domains with hosting found on the Plesk server.")
 
         manifest = Manifest(source=ctx.old, domains=[
-            Domain(name=d.name, docroot_src=d.docroot_src, php=ctx.config.php_version,
+            Domain(name=d.name, docroot_src=d.docroot_src,
+                   php=php_by_domain.get(d.name, ctx.config.php_version),
                    databases=d.databases, mailboxes=d.mailboxes, aliases=d.aliases)
             for d in selected
         ])

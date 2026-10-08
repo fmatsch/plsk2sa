@@ -258,3 +258,7 @@ pre.zone {
 details > summary { padding: .3rem 0; }
 td .btn.small { padding: .15rem .5rem; }
 .dnote { color: var(--muted); font-size: .8rem; max-width: 52ch; }
+
+/* ---------- target software plan ---------- */
+.plan-item { padding: .35rem 0; }
+code.pkgs { font: .76rem var(--mono); color: var(--muted); word-break: break-word; }

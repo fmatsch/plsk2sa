@@ -96,6 +96,7 @@ const S = {
   },
   options: { mode: 'full', dry_run: true, restrict_ip: true, confirmed: false },
   dns: { mode: 'external', old_ips: '', new_ipv4: '', new_ipv6: '', prefilled: false },
+  prepareSel: null,
   run: { state: 'idle', steps: [], next: 0, result: null, source_changes: [], source_state: 'unchanged' },
 };
 let pollTimer = null;
@@ -376,6 +377,7 @@ function renderSelect() {
   function toggle(names, on) {
     for (const n of names) on ? S.selected.add(n) : S.selected.delete(n);
     S.targetReport = null;  // checks on the target depend on the selection
+    S.prepareSel = null;
     sync();
   }
 
@@ -455,6 +457,7 @@ function renderTarget() {
     results.replaceChildren(loading('Running checks on the target server...'));
     S.targetReport = await api('POST', '/api/target/checks', {
       domains: selectedDomains().map(d => d.name), mail_hostname: S.mailHostname });
+    S.prepareSel = null;
     paint();
   }
   async function guarded(fn) {
@@ -505,16 +508,37 @@ const NEXT_STEPS = [
   'Keep the Plesk server for 2–4 weeks before cancelling it.',
 ];
 
+const NEXT_STEPS_PREPARE = [
+  'The target server is ready. Run the wizard again with \u201cFull migration\u201d to copy configuration, files, databases and mailboxes.',
+  'Items marked \u201cInstalled only\u201d (spam filter, virus scanner, PostgreSQL) still need to be connected or filled by you.',
+  'Check the notes above - .htaccess rules and tools outside Ubuntu\u2019s repositories have to be handled by hand.',
+];
+
+const STATUS_ICON = { installed: 'ok', planned: 'pending', partial: 'warn', failed: 'fail' };
+
+function softwareResult(res) {
+  const rows = res.prepare.map(r => h('li', {},
+    statusIcon(STATUS_ICON[r.status] || 'pending'),
+    h('div', {}, h('div', { class: 'check-title' }, r.title, ' ', h('span', { class: 'badge' }, r.status === 'planned' ? 'would install' : r.status)),
+      h('div', { class: 'check-detail' }, h('code', { class: 'pkgs' }, r.packages.join(' '))),
+      r.failed.length ? h('div', { class: 'check-detail' }, 'Not installed: ' + r.failed.join(' ')) : null,
+      r.note ? h('div', { class: 'check-detail' }, r.note) : null)));
+  const notes = ((S.targetReport && S.targetReport.prepare_plan && S.targetReport.prepare_plan.notes) || []).map(n => alertBox('warn', null, n));
+  return [h('h2', {}, 'Software on the target server'), h('ul', { class: 'checks' }, rows), ...notes];
+}
+
 function renderRun() {
   return S.run.state === 'idle' ? renderRunSetup() : renderRunProgress();
 }
 
 // What a run does to the Plesk server - shown before, during and after a run.
-function plannedSourceChanges(dryRun) {
+function plannedSourceChanges(readOnly, mode) {
   const target = S.target ? S.target.host : 'the target';
-  return dryRun
+  return readOnly
     ? alertBox('ok', 'Changes on the Plesk server: none',
-        'A preview only reads from the Plesk server. Everything it would change is listed with “WOULD CHANGE” in the log.')
+        mode === 'prepare'
+          ? 'Preparing the target does not touch the Plesk server; what it needs was read earlier, during the checks.'
+          : 'A preview only reads from the Plesk server. Everything it would change is listed with “WOULD CHANGE” in the log.')
     : h('div', { class: 'alert source', role: 'status' },
         h('strong', {}, 'Changes on the Plesk server'),
         h('ul', { class: 'plain' },
@@ -535,8 +559,11 @@ function renderRunSetup() {
   const o = S.options;
   const dns = S.dns;
   const chosen = selectedDomains();
+  const plan = S.targetReport && S.targetReport.prepare_plan;
   const confirmBox = h('div');
   const sourceBox = h('div');
+  const softwareBox = h('div');
+  const dnsBox = h('div');
   const start = h('button', { class: 'btn primary', type: 'button' });
   const msg = h('div');
 
@@ -547,31 +574,7 @@ function renderRunSetup() {
     dns.new_ipv6 = d.new_ipv6 || '';
     dns.prefilled = true;
   }
-
-  function sync() {
-    start.textContent = o.dry_run ? 'Start preview' : (o.mode === 'full' ? 'Start migration' : 'Start final sync');
-    confirmBox.replaceChildren(o.dry_run ? '' : h('label', { class: 'check' },
-      h('input', { type: 'checkbox', checked: o.confirmed, onchange: (e) => { o.confirmed = e.target.checked; sync(); } }),
-      h('span', {}, 'I understand that this changes ', h('strong', {}, S.target.host),
-        o.mode === 'full' ? ': packages are installed and the web, database and mail configuration there is created or overwritten.'
-          : ': web files, mail and databases there are overwritten with the current state of the Plesk server.')));
-    sourceBox.replaceChildren(plannedSourceChanges(o.dry_run));
-    start.disabled = !o.dry_run && !o.confirmed;
-    persist();
-  }
-
-  start.addEventListener('click', async () => {
-    start.disabled = true;
-    try {
-      await api('POST', '/api/run/start', {
-        mode: o.mode, dry_run: o.dry_run, restrict_ip: o.restrict_ip, confirmed: o.confirmed,
-        domains: chosen.map(d => d.name), mail_hostname: S.mailHostname,
-        dns: { mode: dns.mode, old_ips: dns.old_ips, new_ipv4: dns.new_ipv4, new_ipv6: dns.new_ipv6 } });
-      S.run = { state: 'running', steps: [], next: 0, result: null, source_changes: [], source_state: 'unchanged' };
-      render();
-      poll();
-    } catch (e) { msg.replaceChildren(alertBox('fail', 'Cannot start', e.message)); sync(); }
-  });
+  if (plan && !S.prepareSel) S.prepareSel = new Set(plan.default_selection);
 
   const radio = (name, group, value, label, hint, onpick) => h('label', { class: 'check' },
     h('input', { type: 'radio', name, checked: group === value, onchange: onpick }),
@@ -579,6 +582,74 @@ function renderRunSetup() {
   const text = (id, key, placeholder) => h('input', { type: 'text', id, value: dns[key], spellcheck: 'false',
     autocomplete: 'off', placeholder, oninput: (e) => { dns[key] = e.target.value.trim(); persist(); } });
 
+  function paintSoftware() {
+    if (o.mode === 'sync' || !plan) { softwareBox.replaceChildren(); return; }
+    const rows = plan.items.map(it => {
+      const box = h('input', { type: 'checkbox', checked: it.required || S.prepareSel.has(it.id), disabled: it.required,
+        'aria-label': it.title, onchange: (e) => { e.target.checked ? S.prepareSel.add(it.id) : S.prepareSel.delete(it.id); } });
+      return h('label', { class: 'check plan-item' }, box, h('span', {},
+        h('strong', {}, it.title), ' ',
+        it.required ? h('span', { class: 'badge' }, 'always') : null,
+        it.third_party ? h('span', { class: 'badge warn' }, 'third-party repository') : null,
+        h('br'), h('span', { class: 'muted small' }, it.reason),
+        h('br'), h('code', { class: 'pkgs' }, it.packages.join(' ')),
+        it.note ? h('div', { class: 'dnote' }, it.note) : null));
+    });
+    softwareBox.replaceChildren(
+      h('h2', {}, 'Software on the target server'),
+      h('p', { class: 'muted small' }, 'Found on the Plesk server and needed by the selected sites. ' +
+        'Untick what you do not want installed.'),
+      ...rows, ...(plan.notes || []).map(n => alertBox('warn', null, n)));
+  }
+
+  function paintDns() {
+    if (o.mode === 'prepare') { dnsBox.replaceChildren(); return; }
+    dnsBox.replaceChildren(
+      h('h2', {}, 'DNS'),
+      h('p', { class: 'muted small' }, 'Who answers DNS queries for your domains?'),
+      radio('dns-mode', dns.mode, 'external', 'Somewhere else (registrar, Cloudflare, ...)',
+        'plsk2sa reads the records Plesk holds and lists exactly which ones must change, with the new values.',
+        () => { dns.mode = 'external'; persist(); }),
+      radio('dns-mode', dns.mode, 'plesk', 'This Plesk server (its name servers answer for my domains)',
+        'The zones have to move with the domains. You get complete zone files with the new addresses to import at your new DNS provider.',
+        () => { dns.mode = 'plesk'; persist(); }),
+      h('div', { class: 'grid three' },
+        field('dns-old', 'Old server address(es)', text('dns-old', 'old_ips', '203.0.113.10'),
+          'IPv4, comma separated. Records and SPF entries with these addresses are rewritten.'),
+        field('dns-new', 'New server IPv4', text('dns-new', 'new_ipv4', '203.0.113.20'), 'Public address of the target.'),
+        field('dns-new6', 'New server IPv6 (optional)', text('dns-new6', 'new_ipv6', '2001:db8::20'), 'Leave empty if there is none.')));
+  }
+
+  function sync() {
+    start.textContent = o.dry_run ? 'Start preview' : ({ full: 'Start migration', prepare: 'Prepare the target', sync: 'Start final sync' })[o.mode];
+    const changes = { full: ': packages are installed and the web, database and mail configuration there is created or overwritten.',
+      prepare: ': packages are installed and the web, database and mail services there are configured. No data is copied.',
+      sync: ': web files, mail and databases there are overwritten with the current state of the Plesk server.' };
+    confirmBox.replaceChildren(o.dry_run ? '' : h('label', { class: 'check' },
+      h('input', { type: 'checkbox', checked: o.confirmed, onchange: (e) => { o.confirmed = e.target.checked; sync(); } }),
+      h('span', {}, 'I understand that this changes ', h('strong', {}, S.target.host), changes[o.mode])));
+    sourceBox.replaceChildren(plannedSourceChanges(o.dry_run || o.mode === 'prepare', o.mode));
+    paintSoftware();
+    paintDns();
+    start.disabled = !o.dry_run && !o.confirmed;
+    persist();
+  }
+
+  start.addEventListener('click', async () => {
+    start.disabled = true;
+    try {
+      const body = { mode: o.mode, dry_run: o.dry_run, restrict_ip: o.restrict_ip, confirmed: o.confirmed,
+        domains: chosen.map(d => d.name), mail_hostname: S.mailHostname };
+      if (o.mode !== 'prepare') body.dns = { mode: dns.mode, old_ips: dns.old_ips, new_ipv4: dns.new_ipv4, new_ipv6: dns.new_ipv6 };
+      if (o.mode !== 'sync' && S.prepareSel) body.prepare = { selected: [...S.prepareSel] };
+      await api('POST', '/api/run/start', body);
+      S.run = { state: 'running', steps: [], next: 0, result: null, source_changes: [], source_state: 'unchanged' };
+      render();
+      poll();
+    } catch (e) { msg.replaceChildren(alertBox('fail', 'Cannot start', e.message)); sync(); }
+  });
+
+  const pick = (mode) => () => { o.mode = mode; o.confirmed = false; sync(); };
   const view = h('section', { class: 'card' },
     h('h1', {}, 'Ready to migrate'),
     h('dl', { class: 'summary' },
@@ -588,29 +659,18 @@ function renderRunSetup() {
       h('dt', {}, 'Mail hostname'), h('dd', {}, S.mailHostname),
       h('dt', {}, 'PHP on target'), h('dd', {}, S.targetReport ? S.targetReport.php_version : '-')),
 
-    h('h2', {}, 'DNS'),
-    h('p', { class: 'muted small' }, 'Who answers DNS queries for your domains?'),
-    radio('dns-mode', dns.mode, 'external', 'Somewhere else (registrar, Cloudflare, ...)',
-      'plsk2sa reads the records Plesk holds and lists exactly which ones must change, with the new values.',
-      () => { dns.mode = 'external'; persist(); }),
-    radio('dns-mode', dns.mode, 'plesk', 'This Plesk server (its name servers answer for my domains)',
-      'The zones have to move with the domains. You get complete zone files with the new addresses to import at your new DNS provider.',
-      () => { dns.mode = 'plesk'; persist(); }),
-    h('div', { class: 'grid three' },
-      field('dns-old', 'Old server address(es)', text('dns-old', 'old_ips', '203.0.113.10'),
-        'IPv4, comma separated. Records and SPF entries with these addresses are rewritten.'),
-      field('dns-new', 'New server IPv4', text('dns-new', 'new_ipv4', '203.0.113.20'), 'Public address of the target.'),
-      field('dns-new6', 'New server IPv6 (optional)', text('dns-new6', 'new_ipv6', '2001:db8::20'), 'Leave empty if there is none.')),
-
     h('h2', {}, 'What should happen?'),
-    radio('mode', o.mode, 'full', 'Full migration', 'Install the stack, then copy configuration, files, databases and mailboxes.',
-      () => { o.mode = 'full'; o.confirmed = false; sync(); }),
-    radio('mode', o.mode, 'sync', 'Final sync only', 'For switch day: refresh files, databases and mailboxes on an already migrated server.',
-      () => { o.mode = 'sync'; o.confirmed = false; sync(); }),
+    radio('mode', o.mode, 'full', 'Full migration', 'Install the stack, then copy configuration, files, databases and mailboxes.', pick('full')),
+    radio('mode', o.mode, 'prepare', 'Prepare the target server only',
+      'Install and set up everything the Plesk sites need - PHP versions, extensions, tools, services - without copying any data. A good first step.', pick('prepare')),
+    radio('mode', o.mode, 'sync', 'Final sync only', 'For switch day: refresh files, databases and mailboxes on an already migrated server.', pick('sync')),
     h('label', { class: 'check' },
       h('input', { type: 'checkbox', checked: o.dry_run, onchange: (e) => { o.dry_run = e.target.checked; sync(); } }),
       h('span', {}, h('strong', {}, 'Preview only (recommended for the first run)'), h('br'),
-        h('span', { class: 'muted small' }, 'Reads from the Plesk server and lists every change that would be made, without changing anything. Also shows the DNS plan.'))),
+        h('span', { class: 'muted small' }, 'Lists every change that would be made, without changing anything. Also shows the plan for the target and DNS.'))),
+
+    softwareBox,
+    dnsBox,
     sourceBox,
     confirmBox,
     h('details', {}, h('summary', {}, 'Advanced'),
@@ -748,6 +808,8 @@ function paintResult(box) {
   else if (res.error) kids.push(alertBox('warn', 'Finished with a problem', res.error));
   else if (res.dry_run) kids.push(alertBox('ok', 'Preview complete',
     'The log below lists every command that would run. Nothing was changed.'));
+  else if (res.mode === 'prepare') kids.push(alertBox('ok', 'Target server prepared',
+    'The software the Plesk sites need is installed. No data has been copied yet.'));
   else kids.push(alertBox('ok', 'Migration complete', 'Work through the next steps below to finish the switch.'));
 
   if (res.verify && res.verify.length) {
@@ -756,6 +818,7 @@ function paintResult(box) {
       failed.length ? alertBox('warn', plural(failed.length, 'check') + ' failed', failed.map(v => v.message).join(' · '))
         : alertBox('ok', 'All ' + res.verify.length + ' verification checks passed'));
   }
+  if (res.prepare && res.prepare.length) kids.push(...softwareResult(res));
   if (res.dns) kids.push(...dnsSection(res.dns));
   else if (res.dkim && res.dkim.length) {
     kids.push(h('h2', {}, 'DKIM records to publish'));
@@ -768,7 +831,7 @@ function paintResult(box) {
         '. Enter them into your applications (for WordPress: wp-config.php).'));
   }
   if (!res.dry_run && r.state === 'done') {
-    kids.push(h('h2', {}, 'Next steps'), h('ol', { class: 'next' }, NEXT_STEPS.map(t => h('li', {}, t))),
+    kids.push(h('h2', {}, 'Next steps'), h('ol', { class: 'next' }, (res.mode === 'prepare' ? NEXT_STEPS_PREPARE : NEXT_STEPS).map(t => h('li', {}, t))),
       h('p', { class: 'small' }, h('a', { href: 'https://github.com/fmatsch/plsk2sa/blob/main/docs/cutover.md', target: '_blank', rel: 'noopener noreferrer' }, 'Full cutover checklist')));
   }
   kids.push(h('div', { class: 'actions' },

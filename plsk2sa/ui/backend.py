@@ -23,8 +23,10 @@ from ..config import Config
 from ..context import Context
 from ..demo import DEMO_FINGERPRINT, NEW_IP, OLD_IP, demo_ptr_lookup, make_demo_transports
 from ..dnsplan import DnsOptions
-from ..pipeline import FULL, SYNC, Pipeline
+from ..pipeline import FULL, PREPARE, SYNC, Pipeline
 from ..plesk_export import Inventory, PleskExporter
+from ..prepare import build_plan
+from ..requirements import Requirements, detect
 from ..runner import CommandError, Runner
 from ..transport import HostKeyUnknown, ParamikoTransport, TransportError
 
@@ -103,6 +105,7 @@ class Backend:
         self.source: Optional[Endpoint] = None
         self.target: Optional[Endpoint] = None
         self.inventory: Optional[Inventory] = None
+        self.requirements: Optional[Requirements] = None
         self.target_info: Dict[str, str] = {}
         self.source_report: Optional[dict] = None
         self.target_report: Optional[dict] = None
@@ -190,6 +193,7 @@ class Backend:
             if role == "source":
                 self.source = endpoint
                 self.inventory = None
+                self.requirements = None
                 self.source_report = None
                 self.target_report = None
             else:
@@ -223,10 +227,12 @@ class Backend:
             ctx.ensure_workdir()
             results: List[CheckResult] = check_source(ctx)
             inventory = None
+            self.requirements = None
             if not has_failures(results):
                 try:
                     inventory = PleskExporter(ctx).discover()
                     results.extend(check_inventory(ctx, inventory))
+                    self.requirements = detect(ctx, inventory)
                 except (CommandError, TransportError) as e:
                     results.append(CheckResult("src.discover", FAIL,
                                                "Reading the Plesk configuration failed", str(e)))
@@ -236,6 +242,7 @@ class Backend:
                 "checks": [r.to_dict() for r in results],
                 "can_continue": not has_failures(results),
                 "inventory": inventory.to_dict() if inventory else None,
+                "requirements": self.requirements.to_dict() if self.requirements else None,
             }
             return self.source_report
 
@@ -273,8 +280,14 @@ class Backend:
                 "php_version": info.get("php_version"),
                 "os": info.get("os"),
                 "dns_defaults": self._dns_defaults(ctx),
+                "prepare_plan": self._prepare_plan(selected).to_dict(),
             }
             return self.target_report
+
+    def _prepare_plan(self, selected):
+        """What to install on the target for the selected sites (always recomputed from the selection)."""
+        return build_plan(self.requirements or Requirements(), selected,
+                          default_php=self.target_info.get("php_version") or "8.3")
 
     def _dns_defaults(self, ctx: Context) -> dict:
         """Suggested values for the DNS step; the user can edit all of them."""
@@ -305,7 +318,7 @@ class Backend:
                 raise UserError("Connect to both servers first.")
             selected = self._selection(p.get("domains"))
             mode = p.get("mode") or FULL
-            if mode not in (FULL, SYNC):
+            if mode not in (FULL, SYNC, PREPARE):
                 raise UserError("Unknown mode")
             dry_run = bool(p.get("dry_run", True))
             mail_hostname = str(p.get("mail_hostname", "")).strip()
@@ -316,7 +329,15 @@ class Backend:
             if not self.target_info:
                 raise UserError("Run the checks on the target server first.")
 
-            dns = self._dns_options(p.get("dns"))
+            dns = None if mode == PREPARE else self._dns_options(p.get("dns"))
+            plan = self._prepare_plan(selected)
+            prepare = p.get("prepare")
+            try:
+                chosen = plan.resolve_selection(prepare.get("selected") if isinstance(prepare, dict) else None)
+            except ValueError as e:
+                raise UserError(str(e)) from None
+            if mode == SYNC:
+                chosen = []  # a final sync installs nothing
 
             ctx = self._ctx(mail_hostname)
             ctx.ensure_workdir()
@@ -327,7 +348,8 @@ class Backend:
                 ctx, [d.name for d in selected], mode=mode,
                 old_host_key_line=host_key_line,
                 restrict_ip=bool(p.get("restrict_ip", True)),
-                dns=dns,
+                dns=dns, prepare_plan=plan, prepare_selected=chosen,
+                php_by_domain=plan.php_assignment(selected, chosen),
                 progress=lambda steps: self._on_progress(run, steps),
                 cancel=run.cancel)
             run.steps = [s.to_dict() for s in pipeline.steps]

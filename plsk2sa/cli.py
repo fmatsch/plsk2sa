@@ -6,14 +6,16 @@ import logging
 import sys
 
 from . import __version__
-from .checks import FAIL, WARN, check_source, check_target, default_ptr_lookup
+from .checks import FAIL, UBUNTU_PHP, WARN, _os_release, check_source, check_target, default_ptr_lookup
 from .config import Config, ConfigError
 from .context import Context
 from .dnsplan import DnsOptions, DnsRecord, build_report, report_text
-from .fsutil import read_text
+from .fsutil import read_text, write_text
 from .manifest import ManifestError
 from .modules import build_modules
 from .plesk_export import ExportError, PleskExporter
+from .prepare import apply_plan, build_plan, verify_plan
+from .requirements import detect
 from .runner import CommandError, Runner
 from .transport import TransportError
 
@@ -115,10 +117,50 @@ def cmd_dns(ctx: Context, args):
     report = build_report(domains, records, opts, mail_hostname=ctx.config.mail_hostname, dkim=dkim)
     print(report_text(report))
     if opts.plesk_dns:
-        from .fsutil import write_text
         for dom in report.domains:
             write_text(ctx.dns_dir / f"{dom.domain}.zone", dom.zone or "")
         log.info("Zone files written to %s", ctx.dns_dir)
+
+
+def cmd_prepare(ctx: Context, args):
+    """Install on the new server everything the Plesk server's sites rely on."""
+    inv = PleskExporter(ctx).discover(with_sizes=False)
+    domains = [d for d in inv.domains if not args.domain or d.name in args.domain]
+    if not domains:
+        raise RuntimeError("No matching domains found on the Plesk server.")
+    req = detect(ctx, inv)
+
+    release = _os_release(ctx, ctx.new)
+    ctx.config.php_version = UBUNTU_PHP.get(release.get("VERSION_ID", ""), ctx.config.php_version)
+    plan = build_plan(req, domains, default_php=ctx.config.php_version)
+
+    selected = [i for i in plan.default_selection()
+                if not (args.no_ppa and plan.item(i).third_party) and i not in (args.skip or [])]
+    log.info("Target: %s - PHP %s", release.get("PRETTY_NAME", "unknown OS"), plan.default_php)
+    for it in plan.items:
+        mark = "base" if it.required else ("[x]" if it.id in selected else "[ ]")
+        log.info("  %-5s %-14s %s%s", mark, it.id, it.title, "  (third-party repository)" if it.third_party else "")
+        log.info("        %s", it.reason)
+        if it.note:
+            log.info("        Note: %s", it.note)
+    for note in plan.notes:
+        log.info("* %s", note)
+    if not args.yes and not ctx.runner.dry_run:
+        if input("Install this on the new server? [y/N] ").strip().lower() != "y":
+            log.info("Nothing installed.")
+            return 1
+
+    write_text(ctx.workdir / "php_by_domain.json", json.dumps(plan.php_assignment(domains, selected), indent=2) + "\n")
+    for module in build_modules(ctx):
+        module.provision()
+    for r in apply_plan(ctx, plan, selected):
+        log.info("%-9s %s%s", r.status.upper(), r.title, f" (not installed: {' '.join(r.failed)})" if r.failed else "")
+    if not ctx.runner.dry_run:
+        bad = [m for ok, m in verify_plan(ctx, plan, selected) if not ok]
+        for m in bad:
+            log.warning("FAIL %s", m)
+        return 1 if bad else 0
+    return 0
 
 
 def cmd_ui(argv):
@@ -153,6 +195,11 @@ def main(argv=None) -> int:
         p = sub.add_parser(name, help=helptext)
         p.add_argument("--domain", help="process only this domain")
     sub.add_parser("verify", help="check the target (services, ports, accounts, HTTP)")
+    p = sub.add_parser("prepare", help="install on the new server everything the Plesk sites use")
+    p.add_argument("--domain", action="append", help="only consider these domains (repeatable)")
+    p.add_argument("--no-ppa", action="store_true", help="do not add third-party repositories (PHP versions Ubuntu lacks)")
+    p.add_argument("--skip", action="append", help="leave out a plan item by id, e.g. svc:redis (repeatable)")
+    p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     p = sub.add_parser("dns", help="show how the DNS records must look after the migration")
     p.add_argument("--new-ip", required=True, help="IPv4 address of the new server")
     p.add_argument("--old-ip", action="append", help="IPv4 address of the Plesk server (repeatable)")
@@ -184,6 +231,7 @@ def main(argv=None) -> int:
         "sync": cmd_sync,
         "verify": cmd_verify,
         "dns": cmd_dns,
+        "prepare": cmd_prepare,
     }
     try:
         return commands[args.command](ctx, args) or 0

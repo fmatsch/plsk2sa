@@ -83,8 +83,9 @@ def drive(port, token):
     assert call("POST", "/api/target/connect",
                 {"host": "new.example.com", "accept_fingerprint": FINGERPRINT, **cred})["ok"]
     domains = ["acme-shop.com", "mueller-architekten.de"]
-    assert call("POST", "/api/target/checks",
-                {"domains": domains, "mail_hostname": "mail.acme-shop.com"})["can_continue"]
+    target = call("POST", "/api/target/checks", {"domains": domains, "mail_hostname": "mail.acme-shop.com"})
+    assert target["can_continue"]
+    assert "php:7.4" in [i["id"] for i in target["prepare_plan"]["items"]], "no preparation plan"
     call("POST", "/api/run/start", {
         "mode": "full", "dry_run": True, "domains": domains, "mail_hostname": "mail.acme-shop.com",
         "dns": {"mode": "plesk", "old_ips": ["203.0.113.10"], "new_ipv4": "203.0.113.20"}})
@@ -99,6 +100,16 @@ def drive(port, token):
     assert dns and dns["mode"] == "plesk" and all(d["zone"] for d in dns["domains"]), "no DNS zones in the result"
     assert status["source_state"] == "unchanged", "a preview must not change the Plesk server"
     print("wizard flow ok:", [s["state"] for s in status["steps"]])
+
+    call("POST", "/api/run/reset", {})
+    call("POST", "/api/run/start", {"mode": "prepare", "dry_run": True, "domains": domains,
+                                    "mail_hostname": "mail.acme-shop.com"})
+    while call("GET", "/api/run/status?since=0")["state"] == "running":
+        time.sleep(0.2)
+    status = call("GET", "/api/run/status?since=0")
+    assert status["state"] == "done", f"prepare preview ended as {status['state']}: {status['result']}"
+    assert status["result"]["prepare"], "prepare preview listed no software"
+    print("prepare flow ok:", [r["id"] for r in status["result"]["prepare"]])
 
 
 if __name__ == "__main__":

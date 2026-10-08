@@ -33,10 +33,31 @@ configuration.
 4. **Connect to the target** server; a second set of checks covers the OS,
    free space, reachability of the Plesk server, busy ports, outbound port 25,
    reverse DNS (PTR) and PHP version changes.
-5. **Migrate** - say who hosts your DNS, then start with a *preview* (lists
-   every command, changes nothing) and run for real with a live log. The result
-   page shows the DNS changes, the new database credentials and next steps.
-   Come back for a *final sync* on switch day.
+5. **Migrate** - choose what should happen (*full migration*, *prepare the target
+   only* or *final sync*), say who hosts your DNS, then start with a *preview*
+   (lists every command, changes nothing) and run for real with a live log. The
+   result page shows what was installed, the DNS changes, the new database
+   credentials and next steps. Come back for a *final sync* on switch day.
+
+**Preparing the target.** Besides the base stack, the target needs whatever the
+Plesk sites rely on. plsk2sa reads that from the Plesk server (read-only) and
+offers it as a list you can untick:
+
+- the **PHP versions** the sites run, with the **modules** each version has loaded
+  (imagick, redis, soap, ...) - every site's PHP-FPM pool then uses its own version.
+  Ubuntu ships only one PHP version, so the others come from the third-party
+  repository `ppa:ondrej/php`; the list marks this clearly, and unticking it makes
+  those sites fall back to the target's PHP version
+- **command line tools** found there (Node.js, Composer, git, ImageMagick, ffmpeg,
+  ghostscript, ...) and **services** that are running (Redis, Memcached, fail2ban)
+- items that can only be *installed*, not connected, are off by default and say so:
+  SpamAssassin and ClamAV (not wired into Postfix) and the PostgreSQL server
+  (its data is not migrated)
+
+Choose *Prepare the target server only* to do just this, before any data is copied -
+a good first step, and the preview shows the exact package lists. Things outside
+Ubuntu's repositories (WP-CLI, MongoDB) and `.htaccess` rules (nginx ignores them)
+are listed as notes instead of being guessed at.
 
 **DNS.** The wizard asks who answers DNS queries for your domains:
 
@@ -115,6 +136,7 @@ The same engine runs headless; see `plsk2sa.example.yaml`.
 ```bash
 cp plsk2sa.example.yaml plsk2sa.yaml
 plsk2sa check        # pre-flight checks for both servers
+plsk2sa prepare      # install on the new server what the Plesk sites use (--no-ppa, --skip ID, --yes)
 plsk2sa export       # read the Plesk server -> manifest, DB dumps, mail passwords
 # review workdir/manifest.json
 plsk2sa provision    # set up the base stack on the new server
@@ -154,8 +176,12 @@ your own business (agent forwarding or a key on the new server).
   (backed up to `workdir/crontabs.tar`) and FTP accounts. The checks list the
   subdomains and aliases they find. DNS is *planned*, not applied: plsk2sa never
   changes records at a DNS provider and does not run a DNS server for you.
-- **PHP version:** the target uses the PHP of its Ubuntu release (8.1 on 22.04,
-  8.3 on 24.04); the checks warn when a site ran a different version on Plesk.
+- **PHP version:** a site keeps its Plesk PHP version when the matching version is
+  installed on the target (see *Preparing the target*); otherwise it runs on the PHP
+  of the target's Ubuntu release (8.1 on 22.04, 8.3 on 24.04) and the checks warn.
+- **Apache-specific setups:** the target serves sites with nginx. `.htaccess`
+  rules, Apache modules and Plesk-managed Node.js/Ruby/Python apps are not
+  reproduced.
 - **Windows:** the wizard works on Windows; command-line `new_server: local`
   mode needs Linux or macOS.
 
@@ -167,6 +193,8 @@ plsk2sa/
 ├── ui/               local web GUI: server.py (HTTP, security), backend.py (logic), static/
 ├── pipeline.py       GUI run: export -> provision -> trust -> domains -> verify -> cleanup
 ├── checks.py         pre-flight checks for both servers (shared by GUI and CLI)
+├── requirements.py   what the Plesk server relies on (PHP modules, tools, services) - read-only
+├── prepare.py        maps that to Ubuntu packages, installs the selection, verifies it
 ├── dnsplan.py        DNS planning: record changes and importable zone files
 ├── trust.py          temporary server-to-server SSH key (setup / teardown)
 ├── plesk_export.py   psa database + Plesk CLI: discover() and export()

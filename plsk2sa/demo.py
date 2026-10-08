@@ -58,6 +58,16 @@ PORT_LISTING = [
     (465, "master"), (587, "master"), (993, "dovecot"),
 ]
 
+PHP_MODULES = {
+    "7.4": ["bcmath", "ctype", "curl", "dom", "gd", "imagick", "intl", "json", "mbstring", "mysqli",
+            "mysqlnd", "pdo_mysql", "redis", "soap", "xml", "zip"],
+    "8.1": ["ctype", "curl", "dom", "gd", "intl", "mbstring", "mysqli", "mysqlnd", "pdo_mysql", "xml", "zip"],
+    "8.3": ["ctype", "curl", "dom", "gd", "intl", "mbstring", "mysqli", "pdo_mysql", "xml", "zip"],
+}
+SERVER_TOOLS = ["node", "npm", "composer", "git", "convert", "unzip", "zip", "redis-server", "fail2ban-client"]
+SERVER_SERVICE_UNITS = ["redis-server", "fail2ban"]
+HTACCESS_DOCROOTS = {"/var/www/vhosts/acme-shop.com/httpdocs"}
+
 OLD_IP = "203.0.113.10"
 NEW_IP = "203.0.113.20"
 CDN_IP = "198.51.100.7"
@@ -161,6 +171,18 @@ class DemoTransport(Transport):
                 return f"Demo output of plesk bin {argv[2]} for {argv[-1]}\n", 0
         if cmd == "bash" and "command -v rsync" in argv[-1]:
             return "/usr/bin/rsync\n", 0
+        script = argv[2] if cmd == "bash" and len(argv) > 2 else ""
+        if 'command -v "$c"' in script:
+            return "".join(t + "\n" for t in SERVER_TOOLS), 0
+        if "systemctl is-active --quiet" in script:
+            return "".join(u + "\n" for u in SERVER_SERVICE_UNITS), 0
+        if ".htaccess" in script:
+            return ("yes\n" if argv[-1] in HTACCESS_DOCROOTS else ""), 0
+        m = re.match(r"/opt/plesk/php/(\d\.\d)/bin/php$", cmd)
+        if m and argv[1:] == ["-m"]:
+            mods = PHP_MODULES.get(m.group(1))
+            return (("[PHP Modules]\n" + "\n".join(mods) + "\n\n[Zend Modules]\nZend OPcache\n", 0)
+                    if mods else ("", 127))
         if cmd == "bash" and "mail_auth_view" in argv[-1]:
             return f"{sum(len(v) for v in MAILBOXES.values())}\n", 0
         if cmd == "timeout" and argv[2:3] == ["du"]:
@@ -180,6 +202,8 @@ class DemoTransport(Transport):
             return "".join(f"{i}\t{n}\n" for i, n, _, _ in DOMAINS)
         if "php_handler_id" in s:
             return "".join(f"{n}\t{h}\n" for n, h in PHP_HANDLERS.items())
+        if "GROUP BY type" in s:
+            return "mysql\t3\n"
         if "FROM dns_recs" in s:
             return "".join(f"{dom}\t{t}\t{h}\t{v}\t{o or 'NULL'}\n"
                            for dom, recs in DNS_RECORDS.items() for t, h, v, o in recs)
@@ -227,7 +251,7 @@ class DemoTransport(Transport):
             if argv[1:2] == ["-s"]:
                 if "apt-get install" in stdin:
                     self.world.provisioned = True
-                return "", 0
+                return ("FAILED:\n" if 'echo "FAILED:$failed"' in stdin else ""), 0
             if "pgrep" in script:
                 return "free\n", 0
             if any("route get" in a for a in argv):

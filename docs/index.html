@@ -142,6 +142,7 @@
     <div class="card"><h3>Direkt von Server zu Server</h3><p>Dateien und Postfächer laufen per rsync vom Plesk-Server direkt zum Ziel, nicht über deinen Rechner. Der dafür nötige SSH-Schlüssel ist temporär und wird am Ende entfernt.</p></div>
     <div class="card"><h3>DNS-Plan</h3><p>Liegt das DNS woanders, zeigt es genau, welche Einträge sich ändern. Hostet Plesk das DNS, gibt es fertige Zonendateien zum Importieren.</p></div>
     <div class="card"><h3>Mail-Passwörter bleiben</h3><p>Postfächer ziehen mit ihren Passwörtern um (Dovecot), inklusive Aliasen, Maildirs und neuem DKIM-Schlüssel.</p></div>
+    <div class="card"><h3>Zielserver passend vorbereiten</h3><p>Das Programm erkennt, was die Seiten auf dem Plesk-Server nutzen – PHP-Versionen und -Erweiterungen, Redis, ImageMagick, Node.js, fail2ban – und richtet es auf dem Ziel ein. Jede Domain behält ihre PHP-Version. Auch einzeln, vor dem Umzug der Daten.</p></div>
     <div class="card"><h3>Web und Datenbanken</h3><p>nginx und PHP-FPM mit eigenem Pool pro Domain, MariaDB mit Dump und Restore, Zertifikate danach per certbot.</p></div>
     <div class="card"><h3>Demo-Modus</h3><p>Der ganze Assistent lässt sich mit simulierten Servern durchklicken – ohne dass irgendetwas verbunden oder geändert wird.</p></div>
     <div class="card"><h3>Auch per Kommandozeile</h3><p>Dieselbe Engine läuft ohne Oberfläche, mit Trockenlauf, Checks und DNS-Plan.</p></div>
@@ -160,6 +161,7 @@
     <li><b>Ein Programm, angezeigt im Browser:</b> Die Datei ist eigenständig – ohne Python, ohne Installation, ohne Internetzugang. Beim Start öffnet sie ihre Oberfläche im Standardbrowser (ein kleiner Webserver, der nur auf deinem eigenen Rechner erreichbar ist). Ein eigenes Fenster gibt es nicht.</li>
     <li><b>Was auf dem Plesk-Server passiert:</b> Ein echter Lauf trägt vorübergehend einen markierten SSH-Schlüssel in <code>~/.ssh/authorized_keys</code> ein und entfernt ihn am Ende wieder – auch nach Fehlern oder Abbruch. Sonst wird dort nichts verändert oder gelöscht.</li>
     <li><b>Nicht automatisch migriert:</b> Subdomains, Domain-Aliase, Cronjobs und FTP-Konten. Die Prüfungen listen, was sie finden. DNS wird geplant, aber nie bei einem DNS-Anbieter verändert.</li>
+    <li><b>Zusatzsoftware:</b> Weitere PHP-Versionen kommen aus dem Drittanbieter-Repository <code>ppa:ondrej/php</code> (abwählbar). Spamfilter, Virenscanner und PostgreSQL werden nur installiert, nicht angebunden bzw. befüllt – deshalb sind sie standardmäßig abgewählt. <code>.htaccess</code>-Regeln gelten unter nginx nicht und müssen von Hand übertragen werden.</li>
     <li><b>Passwörter:</b> SSH-Passwörter werden nur zum Verbinden benutzt und weder gespeichert noch protokolliert. Der Arbeitsordner enthält Datenbank-Dumps und die Mail-Passwörter der gewählten Domains.</li>
     <li><b>SmartScreen / Gatekeeper:</b> Die Programme sind nicht code-signiert. Windows zeigt „Weitere Informationen → Trotzdem ausführen“, macOS fragt beim ersten Start (Rechtsklick → Öffnen). Sie werden bei jedem Release öffentlich auf GitHub aus dem Quellcode gebaut; Prüfsummen liegen bei.</li>
   </ul>
