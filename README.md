@@ -1,5 +1,7 @@
 # plsk2sa - Plesk to Standalone
 
+[Project page](https://fmatsch.ist/plsk2sa/) · [Releases](https://github.com/fmatsch/plsk2sa/releases) · [Cutover checklist](docs/cutover.md)
+
 Migrate Plesk hostings (web + mail + databases) to a bare Ubuntu server
 (22.04 / 24.04) - no panel required afterwards. Comes with a **graphical
 wizard** for Windows, macOS and Linux and a scriptable command line.
@@ -59,6 +61,8 @@ server was left unchanged or restored. A preview only ever says "would change".
 **Download** the program for your system from the
 [Releases](https://github.com/fmatsch/plsk2sa/releases) page and run it
 (double-click, or `./plsk2sa` in a terminal). Your browser opens the wizard.
+Releases are built by the CI when a `v*` tag is pushed; until the first one
+exists, run it from source or build it yourself (see *Development*).
 The executables are not code-signed: macOS asks you to confirm
 (right-click > Open, or `xattr -d com.apple.quarantine plsk2sa`) and Windows
 SmartScreen shows "More info > Run anyway".

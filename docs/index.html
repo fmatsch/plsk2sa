@@ -113,10 +113,10 @@
       <h1>plsk2sa</h1>
       <p>Zieht Domains mit Web, Mail und Datenbanken von einem Plesk-Server auf einen eigenen Ubuntu-Server – ohne Panel. Ein Assistent führt durch Verbinden, Prüfen, Auswahl und Umzug; DNS-Änderungen werden gleich mitgeliefert.</p>
       <div class="actions">
-        <a class="btn primary" id="dl" href="https://github.com/fmatsch/plsk2sa/releases/latest">⬇ Herunterladen</a>
-        <a class="btn" href="https://github.com/fmatsch/plsk2sa">Quellcode auf GitHub</a>
+        <a class="btn primary" id="dl" href="https://github.com/fmatsch/plsk2sa#readme">Anleitung &amp; Quellcode auf GitHub</a>
+        <a class="btn" id="src" href="https://github.com/fmatsch/plsk2sa" hidden>Quellcode auf GitHub</a>
       </div>
-      <div class="dl-meta" id="dl-meta">Windows · macOS (Apple Silicon) · Linux · kostenlos, MIT-Lizenz</div>
+      <div class="dl-meta" id="dl-meta">Noch kein fertiges Programm veröffentlicht – bis dahin startet es aus dem Quellcode (Anleitung in der README). Windows · macOS · Linux · MIT-Lizenz</div>
       <div class="dl-all" id="dl-all" hidden></div>
     </div>
   </header>
@@ -190,6 +190,7 @@
       const dl = document.getElementById("dl");
       dl.href = pick.asset.browser_download_url;
       dl.textContent = "⬇ Für " + pick.label + " herunterladen";
+      document.getElementById("src").hidden = false;
       document.getElementById("dl-meta").textContent =
         `${rel.tag_name} · ${Math.round(pick.asset.size / 1048576)} MB · kostenlos, MIT-Lizenz`;
       const all = document.getElementById("dl-all");
